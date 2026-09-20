@@ -1,3 +1,4 @@
+import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -12,6 +13,30 @@ from ingest.sanctions import SanctionsIngestor
 from ingest.usgs import USGSIngestor
 from signals.models import MaterialSignal
 from signals.scorer import DisruptionScorer
+from snapshot.guest import run_guest_snapshot
+from snapshot.jobs import run_daily_snapshot
+
+
+async def _fetch_material_raw(material_name: str) -> list[tuple[str, dict, MaterialSignal]]:
+    """Network-bound only: no DB access, so this is safe to run concurrently
+    across materials (unlike the DB writes in run_pipeline below, which must
+    stay on the single shared AsyncSession)."""
+    fetched: list[tuple[str, dict, MaterialSignal]] = []
+
+    async def _one(cls):
+        ingestor = cls(material_name)
+        try:
+            raw = await ingestor.fetch()
+            signal = await ingestor.normalize(raw)
+            return ingestor.source_name, raw, signal
+        except Exception as exc:
+            print(f"[warn] {ingestor.source_name} failed for {material_name}: {exc}")
+            return None
+
+    for result in await asyncio.gather(*(_one(cls) for cls in (USGSIngestor, ComtradeIngestor, SanctionsIngestor))):
+        if result is not None:
+            fetched.append(result)
+    return fetched
 
 
 async def run_pipeline(db: AsyncSession | None = None):
@@ -22,16 +47,18 @@ async def run_pipeline(db: AsyncSession | None = None):
 
     materials = (await db.execute(select(Material))).scalars().all()
     dispatcher = AlertDispatcher()
-    for material in materials:
+
+    # Same split as snapshot/jobs.py: fetch every material's raw signals
+    # concurrently (pure network I/O), then write to the shared DB session
+    # sequentially. Same RawSignal rows, same scores, same alerts as before
+    # -- only the fetch step is now concurrent instead of one-at-a-time.
+    all_raw = await asyncio.gather(*(_fetch_material_raw(m.name) for m in materials))
+
+    for material, fetched in zip(materials, all_raw):
         collected: list[MaterialSignal] = []
-        for cls in (USGSIngestor, ComtradeIngestor, SanctionsIngestor):
-            ingestor = cls(material.name)
-            try:
-                raw = await ingestor.fetch()
-                db.add(RawSignal(material_id=material.id, source=ingestor.source_name, raw_data=raw))
-                collected.append(await ingestor.normalize(raw))
-            except Exception as exc:
-                print(f"[warn] {ingestor.source_name} failed for {material.name}: {exc}")
+        for source_name, raw, signal in fetched:
+            db.add(RawSignal(material_id=material.id, source=source_name, raw_data=raw))
+            collected.append(signal)
         score, factors = DisruptionScorer.score(collected)
         db.add(DisruptionScore(material_id=material.id, score=score, factors=factors))
         subs = (
@@ -87,6 +114,15 @@ def build_scheduler(session_factory):
         async with session_factory() as db:
             print(await generate_digest(db, 1))
 
+    async def _snapshot_job():
+        async with session_factory() as db:
+            await run_daily_snapshot(db)
+
+    async def _guest_snapshot_job():
+        await run_guest_snapshot()  # owns its own session; isolated from the block above
+
     scheduler.add_job(_job, "interval", hours=6)
     scheduler.add_job(_digest_job, "cron", day_of_week="mon", hour=8, minute=0)
+    scheduler.add_job(_snapshot_job, "cron", hour=6, minute=0)
+    scheduler.add_job(_guest_snapshot_job, "cron", hour=6, minute=5)
     return scheduler

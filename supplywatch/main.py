@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from api.auth import require_api_key
 from api.routes.alerts import router as alerts_router
+from api.routes.guest import router as guest_router
 from api.routes.health import router as health_router
 from api.routes.materials import router as materials_router
 from api.schemas import CreateApiKeyRequest
@@ -45,6 +46,7 @@ app = FastAPI(title="SupplyWatch", version=get_settings().app_version, lifespan=
 app.include_router(health_router)
 app.include_router(materials_router)
 app.include_router(alerts_router)
+app.include_router(guest_router)
 
 @app.post('/auth/keys')
 async def create_key(payload: CreateApiKeyRequest):

@@ -1,7 +1,7 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import AsyncGenerator
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -81,6 +81,49 @@ class AlertHistory(Base):
     score_at_trigger: Mapped[int] = mapped_column(Integer, nullable=False)
     message: Mapped[str] = mapped_column(Text)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class DailySnapshot(Base):
+    """One row per (material, day). Written by the daily snapshot job.
+
+    Unique on (material_id, snapshot_date) so the job's upsert is
+    idempotent: re-running it for a date that already has a row updates
+    that row instead of inserting a duplicate.
+    """
+
+    __tablename__ = "daily_snapshots"
+    __table_args__ = (UniqueConstraint("material_id", "snapshot_date", name="uq_daily_snapshot_material_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("materials.id"), index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    factors: Mapped[dict] = mapped_column(JSONB)
+    summary: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )
+
+
+class GuestDemoSnapshot(Base):
+    """Guest-mode snapshot table, deliberately isolated from per-user data.
+
+    Keyed on material_name (plain string) rather than a Material FK, and
+    written to only by the guest snapshot job, so there is no join path
+    from guest traffic into the authenticated-user schema.
+    """
+
+    __tablename__ = "guest_demo_snapshots"
+    __table_args__ = (UniqueConstraint("material_name", "snapshot_date", name="uq_guest_snapshot_material_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    material_name: Mapped[str] = mapped_column(String(120), index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    trend: Mapped[str] = mapped_column(String(16), default="unchanged")
+    summary: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
