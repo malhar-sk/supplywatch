@@ -27,6 +27,7 @@ from pathlib import Path
 
 import altair as alt
 import pandas as pd
+import plotly.graph_objects as go
 import psycopg2
 import psycopg2.extras
 import streamlit as st
@@ -48,7 +49,7 @@ TREND_META = {
     "falling": {"arrow": "▼", "color": "#34d399"},
     "unchanged": {"arrow": "—", "color": "#8b96a5"},
 }
-PAGES = ["Daily Brief", "Guest Mode", "Portfolio View"]
+PAGES = ["Daily Brief", "Guest Mode", "Portfolio View", "Risk Map"]
 
 
 def _risk_band(score: int) -> dict:
@@ -307,6 +308,70 @@ def _build_export_xlsx(filtered: pd.DataFrame) -> bytes:
     return buf.getvalue()
 
 
+@st.cache_data(ttl=3600)
+def _fetch_material_countries() -> dict[str, list[str]]:
+    """Producer countries per material -- reference data, not a daily
+    signal, so a longer TTL than the score queries above."""
+    conn = _connection()
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("select name, primary_producers from materials")
+        rows = cur.fetchall()
+    return {row["name"]: (row["primary_producers"] or []) for row in rows}
+
+
+def _build_country_risk(history: pd.DataFrame, countries_by_material: dict[str, list[str]]) -> pd.DataFrame:
+    """One row per producer country, scored by the HIGHEST latest risk among
+    the materials it supplies -- not an average, so a country supplying one
+    elevated-risk material isn't diluted by its calmer materials."""
+    latest = history.sort_values("date").groupby("material").tail(1)
+    rows = [
+        {"country": country, "material": r["material"], "score": r["score"]}
+        for _, r in latest.iterrows()
+        for country in countries_by_material.get(r["material"], [])
+    ]
+    if not rows:
+        return pd.DataFrame(columns=["country", "score", "top_material", "materials"])
+    df = pd.DataFrame(rows)
+    grouped = df.loc[df.groupby("country")["score"].idxmax()].rename(columns={"material": "top_material"})
+    grouped = grouped.set_index("country")
+    grouped["materials"] = df.groupby("country")["material"].apply(lambda s: ", ".join(sorted(set(s))))
+    return grouped.reset_index()[["country", "score", "top_material", "materials"]]
+
+
+def _build_country_map(country_df: pd.DataFrame) -> go.Figure:
+    """Static choropleth (no lat/lon needed -- plotly resolves country
+    names) shaded by risk band. dragmode/scrollZoom are disabled at call
+    site so this stays a fixed view, not a pannable map, for a predictable
+    live demo."""
+    band_colorscale = [
+        [0.0, RISK_BANDS["low"]["color"]], [0.4, RISK_BANDS["low"]["color"]],
+        [0.4, RISK_BANDS["moderate"]["color"]], [0.7, RISK_BANDS["moderate"]["color"]],
+        [0.7, RISK_BANDS["elevated"]["color"]], [1.0, RISK_BANDS["elevated"]["color"]],
+    ]
+    fig = go.Figure(data=go.Choropleth(
+        locations=country_df["country"],
+        locationmode="country names",
+        z=country_df["score"],
+        zmin=0, zmax=100,
+        colorscale=band_colorscale,
+        marker_line_color="#1f2733",
+        marker_line_width=0.6,
+        showscale=False,
+        customdata=country_df[["top_material", "materials"]],
+        hovertemplate="<b>%{location}</b><br>Highest-risk material: %{customdata[0]} (%{z})"
+                      "<br>Tracked materials here: %{customdata[1]}<extra></extra>",
+    ))
+    fig.update_geos(
+        showframe=False, showcoastlines=False, bgcolor="rgba(0,0,0,0)",
+        projection_type="natural earth", landcolor="#161b26", showocean=True, oceancolor="#0b0e14",
+    )
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor="rgba(0,0,0,0)",
+        height=420, font=dict(color="#9aa5b3", family="Inter"),
+    )
+    return fig
+
+
 st.set_page_config(page_title="SupplyWatch Daily Brief", page_icon="\U0001F4CA", layout="wide")
 
 st.markdown(
@@ -454,7 +519,7 @@ elif page == "Guest Mode":
         ]
         _render_grid(cards)
 
-else:  # Portfolio View
+elif page == "Portfolio View":
     st.markdown('<div class="sw-section-label">Portfolio view</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="sw-section-caption">Per-material risk over time (colored by each material\'s latest risk band), '
@@ -507,3 +572,60 @@ else:  # Portfolio View
                     file_name=f"supplywatch_portfolio_{start_date}_{end_date}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
+
+else:  # Risk Map
+    st.markdown('<div class="sw-section-label">Risk map</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sw-section-caption">Countries shaded by the highest current risk score among the '
+        'materials they supply — not an average, so one elevated material is never diluted by a calmer one. '
+        'Static view (no pan/zoom), built from the same daily snapshots as Portfolio View.</div>',
+        unsafe_allow_html=True,
+    )
+
+    try:
+        full_history = _fetch_portfolio_history()
+        countries_by_material = _fetch_material_countries()
+    except Exception as exc:  # pragma: no cover - dashboard display path only
+        st.error(f"Could not load risk map data: {exc}")
+        full_history = pd.DataFrame(columns=["material", "date", "score"])
+        countries_by_material = {}
+
+    if full_history.empty:
+        st.info("No snapshot history yet. Run scripts/backfill_snapshots.py first.")
+    else:
+        full_history["date"] = pd.to_datetime(full_history["date"]).dt.date
+        all_materials = sorted(full_history["material"].unique())
+        last_synced = full_history["date"].max()
+
+        st.markdown(
+            f'<div class="sw-hero-sub" style="margin-bottom:0.8rem;">'
+            f'LAST SYNCED · {last_synced} · {len(all_materials)} MATERIALS MONITORED</div>',
+            unsafe_allow_html=True,
+        )
+
+        selected_materials = st.multiselect(
+            "Materials", options=all_materials, default=all_materials, key="riskmap_materials"
+        )
+
+        if not selected_materials:
+            st.warning("Select at least one material to see the map and chart.")
+        else:
+            filtered = full_history[full_history["material"].isin(selected_materials)]
+            country_df = _build_country_risk(filtered, countries_by_material)
+
+            col_map, col_chart = st.columns([6, 5])
+            with col_map:
+                if country_df.empty:
+                    st.info("No producer-country data for the selected materials.")
+                else:
+                    st.plotly_chart(
+                        _build_country_map(country_df),
+                        use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
+                    )
+                    legend = " &nbsp;&nbsp; ".join(
+                        f'<span style="color:{v["color"]}">●</span> {v["label"]}' for v in RISK_BANDS.values()
+                    )
+                    st.markdown(f'<div class="sw-section-caption">{legend}</div>', unsafe_allow_html=True)
+            with col_chart:
+                st.altair_chart(_build_portfolio_chart(filtered), use_container_width=True)
