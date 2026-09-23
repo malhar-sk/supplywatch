@@ -56,7 +56,7 @@ async def run_demo(payload: DemoRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(_pipeline, payload.email)
     return {
         "status": "processing",
-        "message": f"Running pipeline for {payload.email} — brief arrives in ~60 seconds.",
+        "message": f"Checking what {payload.email} may already be exposed to — results in ~60 seconds.",
     }
 
 

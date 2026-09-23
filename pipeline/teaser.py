@@ -76,7 +76,7 @@ def email_subject(md: str, report_date: str) -> str:
         short_date = datetime.strptime(report_date, "%Y-%m-%d").strftime("%b %-d")
     except Exception:
         short_date = report_date
-    return f"SupplyWatch — {mineral} alert | {short_date}"
+    return f"{mineral}: what you may have missed | {short_date}"
 
 
 def substack_title(md: str, report_date: str) -> str:
@@ -117,9 +117,9 @@ def substack_body_html(md: str, report_date: str) -> str:
         )
 
     lines += [
-        f'<p><a href="{WAITLIST_URL}">Full brief + data →</a></p>',
+        f'<p><a href="{WAITLIST_URL}">See what else you may be exposed to →</a></p>',
         "<hr>",
-        "<p><em>SupplyWatch tracks critical mineral supply disruptions weekly. "
+        "<p><em>SupplyWatch flags critical mineral exposure before it hits your BOM. "
         "Free during beta — forward to your procurement team.</em></p>",
     ]
 
@@ -143,7 +143,7 @@ def reddit_body(md: str, report_date: str, substack_url: str = "") -> str:
     reddit_md = re.sub(r"^### (.+)$", r"**\1**", md, flags=re.MULTILINE)
     footer = (
         "\n\n---\n"
-        f"*SupplyWatch is a free weekly critical mineral disruption brief for procurement teams. "
-        f"Subscribe: {link}*"
+        f"*SupplyWatch flags critical mineral exposure before it hits your BOM — free weekly, for procurement teams. "
+        f"Track it: {link}*"
     )
     return reddit_md + footer
