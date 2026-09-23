@@ -13,3 +13,4 @@ supplywatch/.venv-selenium/
 .venv-selenium/
 api-tests-restassured/target/
 selenium-tests/target/
+perf-tests/results.json
