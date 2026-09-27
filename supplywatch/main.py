@@ -56,4 +56,3 @@ async def create_key(payload: CreateApiKeyRequest):
         db.add(ApiKey(key_hash=key_hash, company_name=payload.company_name, tier=payload.tier))
         await db.commit()
     return {"data": {"api_key": raw_key, "tier": payload.tier}, "meta": {"timestamp": __import__('datetime').datetime.now(__import__('datetime').timezone.utc), "version": get_settings().app_version}}
-# negative control test comment Sun Sep 27 10:06:26 IST 2026
