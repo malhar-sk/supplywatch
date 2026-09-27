@@ -79,12 +79,12 @@ EVENTS: list[Event] = [
         "European Parliament Research Service; Clark Hill",
     ),
     Event(
-        date(2026, 6, 15),
+        date(2026, 6, 22),
         "US entity export ban",
-        "10 US firms added to China's Export Control Watchlist, restricting "
-        "Chinese exporters from supplying them dual-use items including "
-        "rare earths and magnets.",
-        "S&P Global",
+        "10 US firms (incl. MP Materials, USA Rare Earths) added to China's "
+        "Export Control Watchlist, restricting Chinese exporters from "
+        "supplying them dual-use items including rare earths and magnets.",
+        "S&P Global (spglobal.com/market-intelligence, 2026-06-22)",
     ),
     Event(
         date(2026, 7, 24),

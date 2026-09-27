@@ -1,0 +1,19 @@
+#!/bin/sh
+# Synthetic user review of the SupplyWatch dashboard, run after any commit
+# that touches it. Fires the review as a detached background process so
+# `git commit` returns immediately.
+#
+# Enable once per clone with: git config core.hooksPath hooks
+
+REPO_ROOT="C:/Users/malha/supplywatch"
+
+CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD)
+echo "$CHANGED" | grep -qE '^supplywatch/(dashboard|snapshot|signals)/' || exit 0
+
+COMMIT_HASH=$(git rev-parse HEAD)
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
+  "Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','$REPO_ROOT/hooks/run-synthetic-review.ps1','-CommitHash','$COMMIT_HASH') -WindowStyle Hidden" \
+  >/dev/null 2>&1 &
+
+exit 0
