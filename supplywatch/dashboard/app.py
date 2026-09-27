@@ -460,7 +460,8 @@ if "page" not in st.session_state:
     st.session_state.page = "Daily Brief"
 
 with st.sidebar:
-    st.markdown('<div class="sw-hero-sub" style="margin-bottom:1rem;">SUPPLYWATCH</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sw-hero-sub" style="margin-bottom:0.2rem;">SUPPLYWATCH</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sw-hero-sub" style="margin-bottom:1rem; font-size:0.65rem; opacity:0.5;">hook test marker</div>', unsafe_allow_html=True)
     for page_name in PAGES:
         is_active = st.session_state.page == page_name
         if st.button(("● " if is_active else "  ") + page_name, key=f"nav_{page_name}", use_container_width=True):
