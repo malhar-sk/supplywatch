@@ -51,6 +51,23 @@ TREND_META = {
 }
 PAGES = ["Daily Brief", "Guest Mode", "Portfolio View", "Risk Map"]
 
+# Fixed, neutral per-material palette for the Portfolio View trend chart --
+# deliberately NOT the RISK_BANDS colors (green/amber/red already mean
+# "risk severity" elsewhere in this app; reusing them for material identity
+# would make two unrelated encodings look like one). Fixed per material
+# (not derived from whatever's currently filtered) so a given material is
+# always the same color regardless of which materials are selected.
+MATERIAL_COLORS = {
+    "Gallium": "#60a5fa",
+    "Germanium": "#a78bfa",
+    "Cobalt": "#f472b6",
+    "Lithium": "#2dd4bf",
+    "Yttrium": "#818cf8",
+    "Dysprosium": "#e879f9",
+    "Indium": "#38bdf8",
+    "Graphite": "#94a3b8",
+}
+
 
 def _risk_band(score: int) -> dict:
     if score >= 70:
@@ -251,27 +268,43 @@ def _render_stats(scores: list[int], label: str) -> None:
 
 
 def _build_portfolio_chart(filtered: pd.DataFrame) -> alt.LayerChart:
-    band_domain = ["low", "moderate", "elevated"]
-    band_range = [RISK_BANDS[b]["color"] for b in band_domain]
-    latest_band = (
-        filtered.sort_values("date").groupby("material").tail(1).set_index("material")["score"].apply(
-            lambda s: "elevated" if s >= 70 else ("moderate" if s >= 40 else "low")
-        )
-    )
     plot_df = filtered.copy()
-    plot_df["band"] = plot_df["material"].map(latest_band)
+    color_scale = alt.Scale(domain=list(MATERIAL_COLORS.keys()), range=list(MATERIAL_COLORS.values()))
 
-    material_lines = (
+    line = (
         alt.Chart(plot_df)
-        .mark_line(point=True, strokeWidth=2.2)
+        .mark_line(strokeWidth=2.2)
         .encode(
             x=alt.X("date:T", title=None),
             y=alt.Y("score:Q", title="Risk score", scale=alt.Scale(domain=[0, 100])),
-            color=alt.Color("band:N", scale=alt.Scale(domain=band_domain, range=band_range), title="Latest band"),
-            detail="material:N",
-            tooltip=["material:N", "date:T", "score:Q"],
+            color=alt.Color("material:N", scale=color_scale, title="Material"),
         )
     )
+
+    # Nearest-date hover, not nearest-point: two materials can land on the
+    # exact same score on the same day, which makes a single overlapping
+    # pixel an impossible hover target. Selecting the whole date column
+    # instead means every material at that date becomes its own larger,
+    # separately-hoverable point rather than one ambiguous overlap.
+    nearest = alt.selection_point(nearest=True, on="mouseover", fields=["date"], empty=False)
+
+    selectors = (
+        alt.Chart(plot_df)
+        .mark_point()
+        .encode(x="date:T", opacity=alt.value(0))
+        .add_params(nearest)
+    )
+
+    points = line.mark_point(size=90, filled=True).encode(
+        opacity=alt.condition(nearest, alt.value(1), alt.value(0)),
+        tooltip=[
+            alt.Tooltip("material:N", title="Material"),
+            alt.Tooltip("date:T", title="Date"),
+            alt.Tooltip("score:Q", title="Score"),
+        ],
+    )
+
+    rule = alt.Chart(plot_df).mark_rule(color="#3a4454").encode(x="date:T").transform_filter(nearest)
 
     daily_avg = filtered.groupby("date", as_index=False)["score"].mean()
     avg_line = (
@@ -280,7 +313,7 @@ def _build_portfolio_chart(filtered: pd.DataFrame) -> alt.LayerChart:
         .encode(x="date:T", y="score:Q", tooltip=[alt.Tooltip("score:Q", title="Avg", format=".1f")])
     )
 
-    chart = (material_lines + avg_line).properties(height=380).interactive()
+    chart = (line + selectors + rule + points + avg_line).properties(height=380).interactive()
     return (
         chart.configure(background="#12161f")
         .configure_view(strokeWidth=0)
