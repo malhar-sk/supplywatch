@@ -51,6 +51,75 @@ TREND_META = {
 }
 PAGES = ["Daily Brief", "Guest Mode", "Portfolio View", "Risk Map"]
 
+# Structural/UI colors only -- RISK_BANDS, TREND_META, and MATERIAL_COLORS
+# above are semantic (risk severity / material identity) and deliberately
+# stay the same across both themes, so "red means elevated" never changes
+# meaning depending on which theme is active.
+THEMES = {
+    "dark": {
+        "app_bg": "radial-gradient(circle at 20% 0%, #131a26 0%, #0b0e14 45%)",
+        "sidebar_bg": "#0e1219",
+        "sidebar_border": "#1f2733",
+        "nav_text": "#9aa5b3",
+        "nav_text_hover": "#eef1f6",
+        "nav_hover_border": "#2a3543",
+        "text_primary": "#eef1f6",
+        "text_secondary": "#9aa5b3",
+        "text_muted": "#6f7c8e",
+        "text_faint": "#4d5866",
+        "card_bg": "#12161f",
+        "card_border": "#1f2733",
+        "chip_bg": "rgba(255,255,255,0.06)",
+        "tag_bg": "#1e2a3a",
+        "tag_border": "#2f4258",
+        "tag_text": "#cfe0f0",
+        "card_shadow": "0 6px 18px rgba(0,0,0,0.25)",
+        "chart_bg": "#12161f",
+        "chart_grid": "#1f2733",
+        "chart_axis": "#8b96a5",
+        "chart_axis_title": "#9aa5b3",
+        "chart_legend_label": "#9aa5b3",
+        "chart_legend_title": "#dfe4eb",
+        "chart_rule": "#3a4454",
+        "chart_avg_line": "#8b96a5",
+        "map_land": "#161b26",
+        "map_ocean": "#0b0e14",
+        "map_border": "#1f2733",
+        "map_font": "#9aa5b3",
+    },
+    "light": {
+        "app_bg": "radial-gradient(circle at 20% 0%, #f7f9fc 0%, #eef1f6 45%)",
+        "sidebar_bg": "#ffffff",
+        "sidebar_border": "#dde3ea",
+        "nav_text": "#5b6575",
+        "nav_text_hover": "#12161f",
+        "nav_hover_border": "#c7cfdb",
+        "text_primary": "#12161f",
+        "text_secondary": "#4b5563",
+        "text_muted": "#6b7280",
+        "text_faint": "#9aa3b2",
+        "card_bg": "#ffffff",
+        "card_border": "#e2e7ee",
+        "chip_bg": "rgba(0,0,0,0.045)",
+        "tag_bg": "#e8f0fa",
+        "tag_border": "#bcd3ea",
+        "tag_text": "#1f3a56",
+        "card_shadow": "0 4px 14px rgba(15,23,42,0.08)",
+        "chart_bg": "#ffffff",
+        "chart_grid": "#e7eaf0",
+        "chart_axis": "#64748b",
+        "chart_axis_title": "#475569",
+        "chart_legend_label": "#475569",
+        "chart_legend_title": "#1f2733",
+        "chart_rule": "#c7cfdb",
+        "chart_avg_line": "#8899ab",
+        "map_land": "#e5e9f0",
+        "map_ocean": "#f7f9fc",
+        "map_border": "#c7cfdb",
+        "map_font": "#475569",
+    },
+}
+
 # Fixed, neutral per-material palette for the Portfolio View trend chart --
 # deliberately NOT the RISK_BANDS colors (green/amber/red already mean
 # "risk severity" elsewhere in this app; reusing them for material identity
@@ -267,7 +336,7 @@ def _render_stats(scores: list[int], label: str) -> None:
         )
 
 
-def _build_portfolio_chart(filtered: pd.DataFrame) -> alt.LayerChart:
+def _build_portfolio_chart(filtered: pd.DataFrame, theme: dict) -> alt.LayerChart:
     plot_df = filtered.copy()
     color_scale = alt.Scale(domain=list(MATERIAL_COLORS.keys()), range=list(MATERIAL_COLORS.values()))
 
@@ -304,24 +373,27 @@ def _build_portfolio_chart(filtered: pd.DataFrame) -> alt.LayerChart:
         ],
     )
 
-    rule = alt.Chart(plot_df).mark_rule(color="#3a4454").encode(x="date:T").transform_filter(nearest)
+    rule = alt.Chart(plot_df).mark_rule(color=theme["chart_rule"]).encode(x="date:T").transform_filter(nearest)
 
     daily_avg = filtered.groupby("date", as_index=False)["score"].mean()
     avg_line = (
         alt.Chart(daily_avg)
-        .mark_line(strokeDash=[5, 4], color="#8b96a5", strokeWidth=1.6)
+        .mark_line(strokeDash=[5, 4], color=theme["chart_avg_line"], strokeWidth=1.6)
         .encode(x="date:T", y="score:Q", tooltip=[alt.Tooltip("score:Q", title="Avg", format=".1f")])
     )
 
     chart = (line + selectors + rule + points + avg_line).properties(height=380).interactive()
     return (
-        chart.configure(background="#12161f")
+        chart.configure(background=theme["chart_bg"])
         .configure_view(strokeWidth=0)
         .configure_axis(
-            labelColor="#8b96a5", titleColor="#9aa5b3", gridColor="#1f2733",
-            domainColor="#1f2733", tickColor="#1f2733", labelFont="Inter", titleFont="Space Grotesk",
+            labelColor=theme["chart_axis"], titleColor=theme["chart_axis_title"], gridColor=theme["chart_grid"],
+            domainColor=theme["chart_grid"], tickColor=theme["chart_grid"], labelFont="Inter", titleFont="Space Grotesk",
         )
-        .configure_legend(labelColor="#9aa5b3", titleColor="#dfe4eb", labelFont="Inter", titleFont="Space Grotesk")
+        .configure_legend(
+            labelColor=theme["chart_legend_label"], titleColor=theme["chart_legend_title"],
+            labelFont="Inter", titleFont="Space Grotesk",
+        )
     )
 
 
@@ -371,7 +443,7 @@ def _build_country_risk(history: pd.DataFrame, countries_by_material: dict[str, 
     return grouped.reset_index()[["country", "score", "top_material", "materials"]]
 
 
-def _build_country_map(country_df: pd.DataFrame) -> go.Figure:
+def _build_country_map(country_df: pd.DataFrame, theme: dict) -> go.Figure:
     """Static choropleth (no lat/lon needed -- plotly resolves country
     names) shaded by risk band. dragmode/scrollZoom are disabled at call
     site so this stays a fixed view, not a pannable map, for a predictable
@@ -387,7 +459,7 @@ def _build_country_map(country_df: pd.DataFrame) -> go.Figure:
         z=country_df["score"],
         zmin=0, zmax=100,
         colorscale=band_colorscale,
-        marker_line_color="#1f2733",
+        marker_line_color=theme["map_border"],
         marker_line_width=0.6,
         showscale=False,
         customdata=country_df[["top_material", "materials"]],
@@ -396,101 +468,105 @@ def _build_country_map(country_df: pd.DataFrame) -> go.Figure:
     ))
     fig.update_geos(
         showframe=False, showcoastlines=False, bgcolor="rgba(0,0,0,0)",
-        projection_type="natural earth", landcolor="#161b26", showocean=True, oceancolor="#0b0e14",
+        projection_type="natural earth", landcolor=theme["map_land"], showocean=True, oceancolor=theme["map_ocean"],
     )
     fig.update_layout(
         margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor="rgba(0,0,0,0)",
-        height=420, font=dict(color="#9aa5b3", family="Inter"),
+        height=420, font=dict(color=theme["map_font"], family="Inter"),
     )
     return fig
 
 
 st.set_page_config(page_title="SupplyWatch Daily Brief", page_icon="\U0001F4CA", layout="wide")
 
+if "page" not in st.session_state:
+    st.session_state.page = "Daily Brief"
+if "theme" not in st.session_state:
+    st.session_state.theme = "dark"
+
+T = THEMES[st.session_state.theme]
+
 st.markdown(
-    """
+    f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap');
 
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .stApp { background: radial-gradient(circle at 20% 0%, #131a26 0%, #0b0e14 45%); }
-    .block-container { padding-top: 2.2rem; max-width: 1180px; }
-    section[data-testid="stSidebar"] { background: #0e1219; border-right: 1px solid #1f2733; }
-    section[data-testid="stSidebar"] .stButton button {
+    html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
+    .stApp {{ background: {T['app_bg']}; }}
+    .block-container {{ padding-top: 2.2rem; max-width: 1180px; }}
+    section[data-testid="stSidebar"] {{ background: {T['sidebar_bg']}; border-right: 1px solid {T['sidebar_border']}; }}
+    section[data-testid="stSidebar"] .stButton button {{
         width: 100%; text-align: left; font-family: 'Space Grotesk', sans-serif; font-weight: 600;
-        background: transparent; border: 1px solid transparent; color: #9aa5b3;
-    }
-    section[data-testid="stSidebar"] .stButton button:hover { border-color: #2a3543; color: #eef1f6; }
+        background: transparent; border: 1px solid transparent; color: {T['nav_text']};
+    }}
+    section[data-testid="stSidebar"] .stButton button:hover {{ border-color: {T['nav_hover_border']}; color: {T['nav_text_hover']}; }}
 
-    .sw-hero-title {
+    .sw-hero-title {{
         font-family: 'Space Grotesk', sans-serif; font-weight: 700;
-        font-size: 2.1rem; color: #eef1f6; letter-spacing: -0.02em; margin-bottom: 0.1rem;
-    }
-    .sw-hero-sub {
+        font-size: 2.1rem; color: {T['text_primary']}; letter-spacing: -0.02em; margin-bottom: 0.1rem;
+    }}
+    .sw-hero-sub {{
         font-family: 'JetBrains Mono', monospace; font-size: 0.82rem;
-        color: #6f7c8e; letter-spacing: 0.02em;
-    }
+        color: {T['text_muted']}; letter-spacing: 0.02em;
+    }}
 
-    .sw-stat {
-        background: #12161f; border: 1px solid #1f2733; border-radius: 10px;
+    .sw-stat {{
+        background: {T['card_bg']}; border: 1px solid {T['card_border']}; border-radius: 10px;
         padding: 14px 6px; text-align: center; margin-bottom: 6px;
-    }
-    .sw-stat-value {
-        font-family: 'Space Grotesk', sans-serif; font-size: 1.6rem; font-weight: 700; color: #eef1f6;
-    }
-    .sw-stat-label {
-        font-family: 'Inter', sans-serif; font-size: 0.72rem; color: #8b96a5;
+    }}
+    .sw-stat-value {{
+        font-family: 'Space Grotesk', sans-serif; font-size: 1.6rem; font-weight: 700; color: {T['text_primary']};
+    }}
+    .sw-stat-label {{
+        font-family: 'Inter', sans-serif; font-size: 0.72rem; color: {T['chart_axis']};
         text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px;
-    }
+    }}
 
-    .sw-section-label {
+    .sw-section-label {{
         font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 1.05rem;
-        color: #dfe4eb; margin: 1.6rem 0 0.2rem 0;
-    }
-    .sw-section-caption { font-family: 'Inter'; font-size: 0.85rem; color: #6f7c8e; margin-bottom: 1rem; }
+        color: {T['chart_legend_title']}; margin: 1.6rem 0 0.2rem 0;
+    }}
+    .sw-section-caption {{ font-family: 'Inter'; font-size: 0.85rem; color: {T['text_muted']}; margin-bottom: 1rem; }}
 
-    .sw-grid {
+    .sw-grid {{
         display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
         gap: 18px; margin-top: 0.6rem;
-    }
-    .sw-card {
-        background: #12161f; border: 1px solid #1f2733; border-left: 4px solid var(--band);
+    }}
+    .sw-card {{
+        background: {T['card_bg']}; border: 1px solid {T['card_border']}; border-left: 4px solid var(--band);
         border-radius: 14px; padding: 18px 20px 14px 20px;
-        box-shadow: 0 6px 18px rgba(0,0,0,0.25);
-    }
-    .sw-card-head { display: flex; justify-content: space-between; align-items: center; }
-    .sw-card-title {
-        font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 1rem; color: #eef1f6;
-    }
-    .sw-symbol {
-        font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: #8b96a5;
-        background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 5px; margin-left: 4px;
-    }
-    .sw-risk-pill {
+        box-shadow: {T['card_shadow']};
+    }}
+    .sw-card-head {{ display: flex; justify-content: space-between; align-items: center; }}
+    .sw-card-title {{
+        font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 1rem; color: {T['text_primary']};
+    }}
+    .sw-symbol {{
+        font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: {T['chart_axis']};
+        background: {T['chip_bg']}; padding: 1px 6px; border-radius: 5px; margin-left: 4px;
+    }}
+    .sw-risk-pill {{
         font-family: 'Inter'; font-size: 0.68rem; font-weight: 600; padding: 3px 9px;
         border-radius: 999px; border: 1px solid; text-transform: uppercase; letter-spacing: 0.03em;
-    }
-    .sw-score-row { display: flex; align-items: baseline; gap: 6px; margin-top: 10px; }
-    .sw-score { font-family: 'JetBrains Mono', monospace; font-size: 2.4rem; font-weight: 700; line-height: 1; }
-    .sw-score-max { font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; color: #6f7c8e; }
-    .sw-trend {
+    }}
+    .sw-score-row {{ display: flex; align-items: baseline; gap: 6px; margin-top: 10px; }}
+    .sw-score {{ font-family: 'JetBrains Mono', monospace; font-size: 2.4rem; font-weight: 700; line-height: 1; }}
+    .sw-score-max {{ font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; color: {T['text_muted']}; }}
+    .sw-trend {{
         font-family: 'Inter'; font-size: 0.75rem; font-weight: 600; margin-left: auto;
         text-transform: capitalize;
-    }
-    .sw-summary { font-family: 'Inter'; font-size: 0.8rem; color: #9aa5b3; line-height: 1.5; margin-top: 10px; min-height: 2.6em; }
-    .sw-sparkline { margin-top: 12px; line-height: 0; }
-    .sw-nohistory { font-family: 'Inter'; font-size: 0.72rem; color: #4d5866; padding: 14px 0; }
+    }}
+    .sw-summary {{ font-family: 'Inter'; font-size: 0.8rem; color: {T['text_secondary']}; line-height: 1.5; margin-top: 10px; min-height: 2.6em; }}
+    .sw-sparkline {{ margin-top: 12px; line-height: 0; }}
+    .sw-nohistory {{ font-family: 'Inter'; font-size: 0.72rem; color: {T['text_faint']}; padding: 14px 0; }}
 
-    [data-baseweb="tag"] { background-color: #1e2a3a !important; border: 1px solid #2f4258 !important; }
-    [data-baseweb="tag"] span, [data-baseweb="tag"] * { color: #cfe0f0 !important; fill: #cfe0f0 !important; font-family: 'Inter'; }
-    div[data-testid="stDateInput"] input, div[data-baseweb="select"] { font-family: 'Inter'; }
+    [data-baseweb="tag"] {{ background-color: {T['tag_bg']} !important; border: 1px solid {T['tag_border']} !important; }}
+    [data-baseweb="tag"] span, [data-baseweb="tag"] * {{ color: {T['tag_text']} !important; fill: {T['tag_text']} !important; font-family: 'Inter'; }}
+    div[data-testid="stDateInput"] input, div[data-baseweb="select"] {{ font-family: 'Inter'; }}
     </style>
     """,
     unsafe_allow_html=True,
 )
-
-if "page" not in st.session_state:
-    st.session_state.page = "Daily Brief"
 
 with st.sidebar:
     st.markdown('<div class="sw-hero-sub" style="margin-bottom:1rem;">SUPPLYWATCH</div>', unsafe_allow_html=True)
@@ -498,6 +574,12 @@ with st.sidebar:
         is_active = st.session_state.page == page_name
         if st.button(("● " if is_active else "  ") + page_name, key=f"nav_{page_name}", use_container_width=True):
             st.session_state.page = page_name
+
+    st.write("")
+    theme_label = "☀️ Light mode" if st.session_state.theme == "dark" else "🌙 Dark mode"
+    if st.button(theme_label, key="toggle_theme", use_container_width=True):
+        st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
+        st.rerun()
 
 st.markdown('<div class="sw-hero-title">SupplyWatch — Daily Signal Dashboard</div>', unsafe_allow_html=True)
 st.markdown(
@@ -596,7 +678,7 @@ elif page == "Portfolio View":
             if filtered.empty:
                 st.warning("No snapshot data in that date range for the selected materials.")
             else:
-                st.altair_chart(_build_portfolio_chart(filtered), use_container_width=True)
+                st.altair_chart(_build_portfolio_chart(filtered, T), use_container_width=True)
 
                 xlsx_bytes = _build_export_xlsx(filtered)
                 st.download_button(
@@ -652,7 +734,7 @@ else:  # Risk Map
                     st.info("No producer-country data for the selected materials.")
                 else:
                     st.plotly_chart(
-                        _build_country_map(country_df),
+                        _build_country_map(country_df, T),
                         use_container_width=True,
                         config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
                     )
@@ -661,4 +743,4 @@ else:  # Risk Map
                     )
                     st.markdown(f'<div class="sw-section-caption">{legend}</div>', unsafe_allow_html=True)
             with col_chart:
-                st.altair_chart(_build_portfolio_chart(filtered), use_container_width=True)
+                st.altair_chart(_build_portfolio_chart(filtered, T), use_container_width=True)
