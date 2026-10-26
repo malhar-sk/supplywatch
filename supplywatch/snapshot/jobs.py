@@ -1,9 +1,15 @@
 """Daily snapshot job.
 
 Additive module: calls the existing, unmodified disruption_score() via the
-existing, unmodified BaseIngestor subclasses, and stores one row per
-material per day. Does not modify ingestion, scoring, or the existing
-threshold-alert / weekly-digest pipeline in scheduler/jobs.py.
+BaseIngestor subclasses, and stores one row per material per day. Does not
+modify scoring or the threshold-alert / weekly-digest pipeline's alerting.
+
+Failed fetches: an ingestor that cannot get data raises SourceUnavailable
+(it no longer returns a neutral 0), and that source is dropped. A material
+with any source missing is skipped for the run -- no row is written and an
+existing row is left untouched -- because scoring the partial set would
+either read a failure as "no risk" or, via disruption_score()'s per-record
+averaging, inflate the other factors. The last good snapshot stays in place.
 
 Idempotency: the write is an upsert keyed on (material_id, snapshot_date).
 Re-running this job for a date that already has a row updates that row in
@@ -27,7 +33,7 @@ from core.database import AsyncSessionLocal, DailySnapshot, Material
 from ingest.comtrade import ComtradeIngestor
 from ingest.sanctions import SanctionsIngestor
 from ingest.usgs import USGSIngestor
-from signals.models import MaterialSignal
+from signals.models import MaterialSignal, missing_sources
 from signals.scorer import DisruptionScorer
 
 log = logging.getLogger(__name__)
@@ -78,6 +84,8 @@ async def run_daily_snapshot(db: AsyncSession | None = None, snapshot_date: date
 
     Returns a list of {material, score, rerun_score_changed} dicts so
     callers (tests, scripts) can inspect what happened without re-querying.
+    A material skipped because a source failed has score None and also
+    carries skipped=True and missing_sources=[...].
     """
     owns_session = db is None
     if owns_session:
@@ -96,6 +104,17 @@ async def run_daily_snapshot(db: AsyncSession | None = None, snapshot_date: date
     all_signals = await asyncio.gather(*(_collect_signals(m.name) for m in materials))
 
     for material, collected in zip(materials, all_signals):
+        missing = missing_sources(collected)
+        if missing:
+            log.warning(
+                "snapshot: skipping %s on %s, no data from %s; last good snapshot kept",
+                material.name, snapshot_date, ", ".join(missing),
+            )
+            results.append(
+                {"material": material.name, "score": None, "rerun_score_changed": False,
+                 "skipped": True, "missing_sources": missing}
+            )
+            continue
         score, factors = DisruptionScorer.score(collected)
         summary = summarize(material.name, score, factors)
 

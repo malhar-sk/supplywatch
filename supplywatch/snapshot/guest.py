@@ -15,6 +15,7 @@ Isolation is structural, not just a convention:
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import date, timedelta
 
 from sqlalchemy import select
@@ -22,9 +23,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import AsyncSessionLocal, GuestDemoSnapshot
+from signals.models import missing_sources
 from signals.scorer import DisruptionScorer
 from snapshot.delta import compute_trend
 from snapshot.jobs import _collect_signals, summarize
+
+log = logging.getLogger(__name__)
 
 # Fixed demo set: guest traffic only ever sees these materials, never a
 # real user's tracked list.
@@ -49,6 +53,18 @@ async def run_guest_snapshot(db: AsyncSession | None = None, snapshot_date: date
     all_signals = await asyncio.gather(*(_collect_signals(name) for name in GUEST_DEMO_MATERIALS))
 
     for material_name, collected in zip(GUEST_DEMO_MATERIALS, all_signals):
+        # Same rule as the authenticated snapshot job: a failed source is not
+        # a zero reading, so skip the material and keep the last good row.
+        missing = missing_sources(collected)
+        if missing:
+            log.warning(
+                "guest snapshot: skipping %s on %s, no data from %s; last good snapshot kept",
+                material_name, snapshot_date, ", ".join(missing),
+            )
+            results.append(
+                {"material": material_name, "score": None, "trend": None, "skipped": True, "missing_sources": missing}
+            )
+            continue
         score, factors = DisruptionScorer.score(collected)
         summary = summarize(material_name, score, factors)
 

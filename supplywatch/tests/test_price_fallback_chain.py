@@ -4,6 +4,9 @@ fallback must only fire when the previous one returned no usable data
 
 from unittest.mock import patch
 
+import pytest
+
+from ingest.base import SourceUnavailable
 from ingest.usgs import _fetch_price_delta_sync
 
 
@@ -42,11 +45,14 @@ def test_falls_through_to_finnhub_when_first_two_have_nothing():
         fh.assert_called_once()
 
 
-def test_neutral_zero_when_every_source_has_nothing():
+def test_raises_when_every_source_has_nothing():
+    # No data is not a flat 0%: the chain gives up with SourceUnavailable
+    # instead of returning a neutral value that would be scored as a reading.
     with patch("ingest.usgs._fetch_price_delta_yfinance", return_value=None), \
          patch("ingest.usgs._fetch_price_delta_twelvedata", return_value=None), \
          patch("ingest.usgs._fetch_price_delta_finnhub", return_value=None):
-        assert _fetch_price_delta_sync("Indium") == 0.0
+        with pytest.raises(SourceUnavailable):
+            _fetch_price_delta_sync("Indium")
 
 
 def test_twelvedata_and_finnhub_are_noops_without_api_keys():

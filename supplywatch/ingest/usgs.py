@@ -18,7 +18,9 @@ data, not just a flat 0% -- those are genuinely different outcomes):
      other two, used only as a last resort (free tier: 60 calls/min --
      https://finnhub.io/pricing). Needs FINNHUB_API_KEY; silently skipped
      if unset.
-  4. Neutral 0.0, same as before this fallback chain existed.
+  4. Give up: raise SourceUnavailable. No data is not the same as a flat
+     0%, so it is never scored as one; the caller skips the material for
+     that run instead (signals.models.missing_sources).
 
 Alpha Vantage was evaluated and rejected: its free tier has shrunk to 25
 requests/day, too low to cover 8 materials reliably.
@@ -40,7 +42,7 @@ import yfinance as yf
 
 from core.cache import cached_call
 from core.config import get_settings
-from ingest.base import BaseIngestor
+from ingest.base import BaseIngestor, SourceUnavailable
 from signals.models import MaterialSignal
 
 log = logging.getLogger(__name__)
@@ -134,7 +136,7 @@ def _fetch_price_delta_sync(material: str) -> float:
         result = fetch(material)
         if result is not None:
             return result
-    return 0.0
+    raise SourceUnavailable(f"no price data for {material} from any provider")
 
 
 class USGSIngestor(BaseIngestor):
@@ -144,14 +146,12 @@ class USGSIngestor(BaseIngestor):
         self.material = material
 
     async def fetch(self) -> dict:
-        try:
-            delta_pct = await cached_call(
-                f"price:{self.material}",
-                lambda: asyncio.to_thread(_fetch_price_delta_sync, self.material),
-            )
-        except Exception as exc:
-            log.warning("price fetch failed for %s: %s", self.material, exc)
-            delta_pct = 0.0
+        # A failure raises (SourceUnavailable) and is not cached, so the next
+        # call retries instead of reusing a bad value for the cache TTL.
+        delta_pct = await cached_call(
+            f"price:{self.material}",
+            lambda: asyncio.to_thread(_fetch_price_delta_sync, self.material),
+        )
         return {"price_delta": delta_pct}
 
     async def normalize(self, raw: dict) -> MaterialSignal:

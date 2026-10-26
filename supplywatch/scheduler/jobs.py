@@ -11,7 +11,7 @@ from core.database import AlertHistory, AlertSubscription, AsyncSessionLocal, Di
 from ingest.comtrade import ComtradeIngestor
 from ingest.sanctions import SanctionsIngestor
 from ingest.usgs import USGSIngestor
-from signals.models import MaterialSignal
+from signals.models import MaterialSignal, missing_sources
 from signals.scorer import DisruptionScorer
 from snapshot.guest import run_guest_snapshot
 from snapshot.jobs import run_daily_snapshot
@@ -59,6 +59,14 @@ async def run_pipeline(db: AsyncSession | None = None):
         for source_name, raw, signal in fetched:
             db.add(RawSignal(material_id=material.id, source=source_name, raw_data=raw))
             collected.append(signal)
+        # A failed source is not a zero reading: with one missing, scoring
+        # would either read the failure as "no risk" or inflate the other
+        # factors (disruption_score averages per record). Skip the score and
+        # its alerts for this run; the raw rows that did arrive are kept.
+        missing = missing_sources(collected)
+        if missing:
+            print(f"[warn] skipping score and alerts for {material.name}: no data from {', '.join(missing)}")
+            continue
         score, factors = DisruptionScorer.score(collected)
         db.add(DisruptionScore(material_id=material.id, score=score, factors=factors))
         subs = (

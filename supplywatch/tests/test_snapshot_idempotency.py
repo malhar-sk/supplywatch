@@ -5,10 +5,12 @@ running the job twice for the same date must not create duplicate rows.
 
 import asyncio
 from datetime import date
+from unittest.mock import patch
 
 from sqlalchemy import delete, select
 
 from core.database import AsyncSessionLocal, Base, DailySnapshot, Material, engine
+from signals.models import MaterialSignal
 from snapshot.jobs import run_daily_snapshot
 
 TEST_MATERIAL = ("Cobalt", "Co", "Battery Metal", ["DRC", "Indonesia"])
@@ -49,9 +51,20 @@ def test_snapshot_job_is_idempotent():
                 await db.execute(delete(DailySnapshot).where(DailySnapshot.snapshot_date == snapshot_date))
                 await db.commit()
 
+        # Fixed, complete signals so the test does not depend on the network:
+        # a material whose fetch fails is now skipped (tests/test_failed_fetch.py)
+        # instead of being written with zeros, which would leave no row here.
+        async def _fixed_signals(name):
+            return [
+                MaterialSignal(material=name, source="usgs", price_delta=5.0),
+                MaterialSignal(material=name, source="sanctions", export_mentions=1),
+                MaterialSignal(material=name, source="comtrade", trade_hhi=4900.0),
+            ]
+
         await _clean()
-        await run_daily_snapshot(snapshot_date=snapshot_date)
-        await run_daily_snapshot(snapshot_date=snapshot_date)  # rerun for the same date
+        with patch("snapshot.jobs._collect_signals", new=_fixed_signals):
+            await run_daily_snapshot(snapshot_date=snapshot_date)
+            await run_daily_snapshot(snapshot_date=snapshot_date)  # rerun for the same date
 
         async with AsyncSessionLocal() as db:
             rows = (
