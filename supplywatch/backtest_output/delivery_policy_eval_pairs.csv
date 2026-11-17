@@ -1,0 +1,12 @@
+event,event_date,material,baseline,brief_date,alert_date,brief_days,alert_days,lead_days,status,window_days
+Indium licensing controls,2025-02-04,Indium,28.0,2025-02-10,2025-02-10,6,6,0,both_see,56
+Heavy rare-earth export controls,2025-04-04,Dysprosium,43.5,2025-04-07,,3,,,alert_never,56
+Heavy rare-earth export controls,2025-04-04,Yttrium,45.5,2025-04-07,,3,,,alert_never,56
+Second-wave controls announced,2025-10-09,Dysprosium,61.5,2025-10-13,2025-10-13,4,4,0,both_see,28
+Second-wave controls announced,2025-10-09,Yttrium,64.0,2025-10-13,2025-10-13,4,4,0,both_see,28
+Second-wave controls suspended,2025-11-07,Dysprosium,75.5,,,,,,no_rise,56
+Second-wave controls suspended,2025-11-07,Yttrium,76.5,,,,,,no_rise,56
+US entity export ban,2026-06-22,Dysprosium,60.0,,,,,,no_rise,31
+US entity export ban,2026-06-22,Yttrium,62.0,,,,,,no_rise,31
+EU entity export ban,2026-07-24,Dysprosium,65.0,,,,,,no_rise,56
+EU entity export ban,2026-07-24,Yttrium,68.0,,,,,,no_rise,56
